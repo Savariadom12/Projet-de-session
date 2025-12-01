@@ -1,0 +1,624 @@
+# docker-compose.yml — Sécurité maximale (non-root, cap_drop, no-new-privileges, limits, réseaux segmentés)
+# Version: 3.9
+# IMPORTANT:
+# - deploy.resources.* (cpus/memory) est inclus pour usage avec Swarm / tooling
+#   si tu utilises docker-compose standalone, pense à utiliser 'mem_limit' et 'cpus' propres
+# - AppArmor profiles et contextes SELinux sont fournis en exemple. Tu dois créer/installer
+#   les profils AppArmor sur l'hôte et les labels SELinux selon ta distribution.
+
+version: "3.9"
+
+services:
+  # ----------------------------------------
+  # Reverse Proxy & Service Discovery (DMZ)
+  # ----------------------------------------
+  traefik:
+    image: traefik:v2.11.4
+    container_name: "traefik"
+    command:
+      - "--api.insecure=false"            # dashboard non exposé par défaut en prod
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--metrics.prometheus=true"
+    ports:
+      - "80:80"
+      - "443:443"
+    # Exécution non-root (traefik container fournit souvent un utilisateur non-root)
+    user: "1000:1000"
+    security_opt:
+      - no-new-privileges:true
+      # Exemple AppArmor profile (doit être créé sur l'hôte)
+      - apparmor:profile:traefik-profile
+      # Exemple SELinux label (optionnel selon distro) : system_u:object_r:container_t:s0:c123,c456
+      # - label:type:container_runtime_t
+    cap_drop:
+      - ALL
+    cap_add: []
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"   # nécessaire si Traefik lit Docker
+      - traefik_cert_data:/etc/traefik
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+    networks:
+      - dmz
+
+  # ----------------------------------------
+  # Core University Services (Web - Internal network)
+  # ----------------------------------------
+  drupal:
+    image: drupal:10.3-apache-bullseye
+    container_name: drupal-crm
+    depends_on:
+      - drupal-db
+    environment:
+      - POSTGRES_DB=${DRUPAL_DB_NAME}
+      - POSTGRES_USER=${DRUPAL_DB_USER}
+      - POSTGRES_PASSWORD=${DRUPAL_DB_PASSWORD}
+      - POSTGRES_HOST=drupal-db
+    user: "www-data"
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:profile:php-www-profile
+    cap_drop:
+      - ALL
+    read_only: false   # l'application peut écrire dans /var/www/html via volumes
+    tmpfs:
+      - /var/www/html/tmp
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 1024M
+    volumes:
+      - drupal_modules:/var/www/html/modules:rw
+      - drupal_profiles:/var/www/html/profiles:rw
+      - drupal_sites:/var/www/html/sites:rw
+      - drupal_themes:/var/www/html/themes:rw
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.drupal.rule=Host(`crm.university.local`, `portail.university.local`)"
+      - "traefik.http.routers.drupal.entrypoints=websecure"
+      - "traefik.http.routers.drupal.tls=true"
+      - "traefik.http.services.drupal.loadbalancer.server.port=80"
+    networks:
+      - web
+      - internal
+
+  drupal-db:
+    image: postgres:16.3-alpine3.20
+    container_name: drupal-db
+    environment:
+      - POSTGRES_DB=${DRUPAL_DB_NAME}
+      - POSTGRES_USER=${DRUPAL_DB_USER}
+      - POSTGRES_PASSWORD=${DRUPAL_DB_PASSWORD}
+    user: "999:999"
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:profile:postgres-db-profile
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN    # si nécessaire pour initialisation de volume
+    read_only: false
+    tmpfs:
+      - /var/run/postgresql
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 1024M
+    volumes:
+      - drupal_db_data:/var/lib/postgresql/data:rw
+    networks:
+      - internal
+
+  moodle:
+    image: ellakcy/moodle:mysql_maria_apache_405_php8.3
+    container_name: moodle-lms
+    depends_on:
+      - moodle-db
+    environment:
+      - MOODLE_URL=http://lms.university.local
+      - MOODLE_DB_HOST=moodle-db
+      - MOODLE_DB_NAME=${MOODLE_DB_NAME}
+      - MOODLE_DB_USER=${MOODLE_DB_USER}
+      - MOODLE_DB_PASSWORD=${MOODLE_DB_PASSWORD}
+    user: "www-data"
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:profile:php-www-profile
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 1024M
+    volumes:
+      - moodle_data:/var/www/html:rw
+      - moodledata_data:/var/moodledata:rw
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.moodle.rule=Host(`lms.university.local`)"
+      - "traefik.http.routers.moodle.entrypoints=websecure"
+      - "traefik.http.routers.moodle.tls=true"
+      - "traefik.http.services.moodle.loadbalancer.server.port=80"
+    networks:
+      - web
+      - internal
+
+  moodle-db:
+    image: mysql:8.4
+    container_name: moodle-db
+    environment:
+      - MYSQL_ONETIME_PASSWORD="yes"
+      - MYSQL_RANDOM_ROOT_PASSWORD="yes"
+      - MYSQL_USER=${MOODLE_DB_USER}
+      - MYSQL_PASSWORD=${MOODLE_DB_PASSWORD}
+      - MYSQL_DATABASE=${MOODLE_DB_NAME}
+    user: "999:999"
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:profile:mysql-db-profile
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 1024M
+    volumes:
+      - moodle_db_data:/var/lib/mysql:rw
+    networks:
+      - internal
+
+  # ----------------------------------------
+  # Supporting Services (Internal)
+  # ----------------------------------------
+  nextcloud:
+    image: nextcloud:29.0.5-apache
+    container_name: nextcloud-files
+    depends_on:
+      - nextcloud-db
+    environment:
+      - POSTGRES_HOST=nextcloud-db
+      - POSTGRES_DB=${NEXTCLOUD_DB_NAME}
+      - POSTGRES_USER=${NEXTCLOUD_DB_USER}
+      - POSTGRES_PASSWORD=${NEXTCLOUD_DB_PASSWORD}
+    user: "www-data"
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:profile:php-www-profile
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 1024M
+    volumes:
+      - nextcloud_data:/var/www/html:rw
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.nextcloud.rule=Host(`files.university.local`)"
+      - "traefik.http.routers.nextcloud.entrypoints=websecure"
+      - "traefik.http.routers.nextcloud.tls=true"
+      - "traefik.http.services.nextcloud.loadbalancer.server.port=80"
+    networks:
+      - web
+      - internal
+
+  nextcloud-db:
+    image: postgres:16.3-alpine3.20
+    container_name: nextcloud-db
+    environment:
+      - POSTGRES_DB=${NEXTCLOUD_DB_NAME}
+      - POSTGRES_USER=${NEXTCLOUD_DB_USER}
+      - POSTGRES_PASSWORD=${NEXTCLOUD_DB_PASSWORD}
+    user: "999:999"
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:profile:postgres-db-profile
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 1024M
+    volumes:
+      - nextcloud_db_data:/var/lib/postgresql/data:rw
+    networks:
+      - internal
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.5
+    container_name: keycloak-sso
+    command: start-dev
+    environment:
+      - KC_BOOTSTRAP_ADMIN_USERNAME=${KEYCLOAK_ADMIN_USER}
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}
+      - KC_DB=postgres
+      - KC_DB_URL_HOST=keycloak-db
+      - KC_DB_URL_DATABASE=${KEYCLOAK_DB_NAME}
+      - KC_DB_USERNAME=${KEYCLOAK_DB_USER}
+      - KC_DB_PASSWORD=${KEYCLOAK_DB_PASSWORD}
+      - KC_PROXY_ADDRESS_FORWARDING=true
+      - KC_HOSTNAME=sso.university.local
+      - KC_HTTP_ENABLED=true
+    depends_on:
+      - keycloak-db
+    user: "1000:1000"
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:profile:keycloak-profile
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 768M
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.keycloak.rule=Host(`sso.university.local`)"
+      - "traefik.http.routers.keycloak.entrypoints=websecure"
+      - "traefik.http.routers.keycloak.tls=true"
+      - "traefik.http.services.keycloak.loadbalancer.server.port=8080"
+    networks:
+      - web
+      - internal
+
+  keycloak-db:
+    image: postgres:16.3-alpine3.20
+    container_name: keycloak-db
+    environment:
+      - POSTGRES_DB=${KEYCLOAK_DB_NAME}
+      - POSTGRES_USER=${KEYCLOAK_DB_USER}
+      - POSTGRES_PASSWORD=${KEYCLOAK_DB_PASSWORD}
+    user: "999:999"
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:profile:postgres-db-profile
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 1024M
+    volumes:
+      - keycloak_db_data:/var/lib/postgresql/data:rw
+    networks:
+      - internal
+
+  n8n:
+    image: n8nio/n8n:1.73.0
+    container_name: n8n-workflow
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=n8n-db
+      - DB_POSTGRESDB_DATABASE=${N8N_DB_NAME}
+      - DB_POSTGRESDB_USER=${N8N_DB_USER}
+      - DB_POSTGRESDB_PASSWORD=${N8N_DB_PASSWORD}
+      - N8N_SECURE_COOKIE=true
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.n8n.rule=Host(`workflow.university.local`)"
+      - "traefik.http.routers.n8n.entrypoints=websecure"
+      - "traefik.http.routers.n8n.tls=true"
+      - "traefik.http.services.n8n.loadbalancer.server.port=5678"
+    depends_on:
+      - n8n-db
+    user: "node:node"
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:profile:n8n-profile
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+    networks:
+      - web
+      - internal
+
+  n8n-db:
+    image: postgres:16.3-alpine3.20
+    container_name: n8n-db
+    environment:
+      - POSTGRES_DB=${N8N_DB_NAME}
+      - POSTGRES_USER=${N8N_DB_USER}
+      - POSTGRES_PASSWORD=${N8N_DB_PASSWORD}
+    user: "999:999"
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:profile:postgres-db-profile
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 512M
+    volumes:
+      - n8n_db_data:/var/lib/postgresql/data:rw
+    networks:
+      - internal
+
+  # ----------------------------------------
+  # Monitoring & Observability (Observability network)
+  # ----------------------------------------
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prometheus.rule=Host(`monitoring.university.local`)"
+      - "traefik.http.routers.prometheus.entrypoints=websecure"
+      - "traefik.http.routers.prometheus.tls=true"
+      - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:profile:prometheus-profile
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /prometheus
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+    networks:
+      - observability
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.2
+    container_name: cadvisor
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.cadvisor.rule=Host(`cadvisor.university.local`)"
+      - "traefik.http.routers.cadvisor.entrypoints=websecure"
+      - "traefik.http.routers.cadvisor.tls=true"
+      - "traefik.http.services.cadvisor.loadbalancer.server.port=8080"
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:profile:cadvisor-profile
+    cap_drop:
+      - ALL
+    cap_add:
+      - SYS_ADMIN  # cAdvisor may need des privileges; limiter selon tests
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+    networks:
+      - observability
+
+  mysqld-exporter:
+    image: prom/mysqld-exporter:v0.16.0
+    container_name: mysqld-exporter
+    environment:
+      - MOODLE_DB_USER=${MOODLE_DB_USER}
+      - MOODLE_DB_PASSWORD=${MOODLE_DB_PASSWORD}
+    volumes:
+      - ./mysqld-exporter.cnf:/etc/.my.cnf:ro
+    command:
+      - '--config.my-cnf=/etc/.my.cnf'
+    depends_on:
+      - moodle-db
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:profile:exporter-profile
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "0.10"
+          memory: 128M
+    networks:
+      - observability
+      - internal
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    container_name: grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=https://grafana.university.local
+    depends_on:
+      - prometheus
+    volumes:
+      - grafana_data:/var/lib/grafana:rw
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.university.local`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure"
+      - "traefik.http.routers.grafana.tls=true"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:profile:grafana-profile
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 512M
+    networks:
+      - observability
+      - internal
+
+  # ----------------------------------------
+  # LABS ENVIRONMENT (DMZ / isolated network)
+  # ----------------------------------------
+  kasm:
+    image: linuxserver/kasm:latest
+    container_name: kasm-lab
+    restart: unless-stopped
+    shm_size: "1g"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Toronto
+      - KASM_PORT=443
+      - KASM_PUBLIC_URL=https://kasm.university.local
+    volumes:
+      - kasm_config:/config:rw
+      - /dev/shm:/dev/shm:rw
+    ports:
+      - "443:443"
+      - "3000:3000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.kasm.rule=Host(`kasm.university.local`)"
+      - "traefik.http.routers.kasm.entrypoints=websecure"
+      - "traefik.http.routers.kasm.tls=true"
+      - "traefik.http.services.kasm.loadbalancer.server.port=443"
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:profile:kasm-profile
+    cap_drop:
+      - ALL
+    # Kasm requires privilèges pour accéder à des devices; limiter au minimum
+    privileged: false
+    cap_add:
+      - SYS_ADMIN
+      - SYS_RESOURCE
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 2048M
+    networks:
+      - dmz
+
+# ----------------------------------------
+# Networks: segmentation claire
+# ----------------------------------------
+networks:
+  dmz:
+    driver: bridge
+    driver_opts: {}
+  web:
+    driver: bridge
+  internal:
+    driver: bridge
+  observability:
+    driver: bridge
+
+# ----------------------------------------
+# Volumes
+# ----------------------------------------
+volumes:
+  traefik_cert_data:
+  drupal_db_data:
+  drupal_modules:
+  drupal_profiles:
+  drupal_sites:
+  drupal_themes:
+  moodle_data:
+  moodledata_data:
+  moodle_db_data:
+  nextcloud_data:
+  nextcloud_db_data:
+  keycloak_db_data:
+  n8n_db_data:
+  grafana_data:
+  kasm_config:
+
+
+
+# Diagramme fourni (chemin local) : /mnt/data/Capture d’écran 2025-11-20 134913.png
+# (Je l'ai intégré dans le workspace pour référence.)
+
+# Docker Secrets Configuration (Per-Service Files)
+
+secrets:
+  drupal_db_password:
+    file: ./secrets/drupal/db_password.txt
+  drupal_db_user:
+    file: ./secrets/drupal/db_user.txt
+
+  moodle_db_password:
+    file: ./secrets/moodle/db_password.txt
+  moodle_db_user:
+    file: ./secrets/moodle/db_user.txt
+
+  keycloak_admin_password:
+    file: ./secrets/keycloak/admin_password.txt
+  keycloak_db_password:
+    file: ./secrets/keycloak/db_password.txt
+
+  n8n_db_password:
+    file: ./secrets/n8n/db_password.txt
+  n8n_db_user:
+    file: ./secrets/n8n/db_user.txt
+
+# Example service update (apply similar pattern to all DB-backed services):
+
+# drupal:
+#   environment:
+#     POSTGRES_PASSWORD_FILE: /run/secrets/drupal_db_password
+#     POSTGRES_USER_FILE: /run/secrets/drupal_db_user
+#   secrets:
+#     - drupal_db_password
+#     - drupal_db_user
+
+# moodle:
+#   environment:
+#     MOODLE_DB_PASSWORD_FILE: /run/secrets/moodle_db_password
+#     MOODLE_DB_USER_FILE: /run/secrets/moodle_db_user
+#   secrets:
+#     - moodle_db_password
+#     - moodle_db_user
+
+# keycloak:
+#   environment:
+#     KC_BOOTSTRAP_ADMIN_PASSWORD_FILE: /run/secrets/keycloak_admin_password
+#     KC_DB_PASSWORD_FILE: /run/secrets/keycloak_db_password
+#   secrets:
+#     - keycloak_admin_password
+#     - keycloak_db_password
+
+# n8n:
+#   environment:
+#     DB_POSTGRESDB_PASSWORD_FILE: /run/secrets/n8n_db_password
+#     DB_POSTGRESDB_USER_FILE: /run/secrets/n8n_db_user
+#   secrets:
+#     - n8n_db_password
+#     - n8n_db_user
+
+# Notes:
+# - Secrets are mounted read-only at /run/secrets/<name>
+# - Environment variables ending with _FILE are supported by most apps or can be handled via entrypoint scripts.
+# - Ensure each secret file contains *only* the raw value without quotes or variable names.

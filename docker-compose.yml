@@ -3,7 +3,7 @@ services:
   # Reverse Proxy & Service Discovery
   # ----------------------------------------
   traefik:
-    image: "traefik:v2.10"
+    image: traefik:v2.11.4
     container_name: "traefik"
     command:
       - "--api.insecure=true"
@@ -23,7 +23,7 @@ services:
   # Core University Services
   # ----------------------------------------
   drupal:
-    image: drupal:10-apache
+    image: drupal:10.3-apache-bullseye
     container_name: drupal-crm
     depends_on:
       - drupal-db
@@ -46,7 +46,7 @@ services:
       - platform-network
 
   drupal-db:
-    image: postgres:15-alpine
+    image: postgres:16.3-alpine3.20
     container_name: drupal-db
     environment:
       - POSTGRES_DB=${DRUPAL_DB_NAME}
@@ -80,7 +80,7 @@ services:
       - platform-network
 
   moodle-db:
-    image: mysql:8.0
+    image: mysql:8.4
     expose:
       - 3306    
     container_name: moodle-db
@@ -98,7 +98,7 @@ services:
   # ----------------------------------------
   # Supporting Services
   # ----------------------------------------
-  nextcloud:
+  Nextcloud:
     image: nextcloud:latest
     container_name: nextcloud-files
     depends_on:
@@ -119,7 +119,7 @@ services:
       - platform-network
 
   nextcloud-db:
-    image: postgres:15-alpine
+    image: postgres:16.3-alpine3.20
     container_name: nextcloud-db
     environment:
       - POSTGRES_DB=${NEXTCLOUD_DB_NAME}
@@ -131,7 +131,7 @@ services:
       - platform-network
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.4.0
+    image: quay.io/keycloak/keycloak:26.0.5
     container_name: keycloak-sso
     command: start-dev
     environment:
@@ -157,7 +157,7 @@ services:
       - platform-network
 
   keycloak-db:
-    image: postgres:15-alpine
+    image: postgres:16.3-alpine3.20
     container_name: keycloak-db
     environment:
       - POSTGRES_DB=${KEYCLOAK_DB_NAME}
@@ -169,7 +169,7 @@ services:
       - platform-network
 
   n8n:
-    image: n8nio/n8n:latest
+    image: n8nio/n8n:1.73.0
     container_name: n8n-workflow
     environment:
       - DB_TYPE=postgresdb
@@ -187,7 +187,7 @@ services:
       - platform-network
       
   n8n-db:
-    image: postgres:15-alpine
+    image: postgres:16.3-alpine3.20
     container_name: n8n-db
     environment:
       - POSTGRES_DB=${N8N_DB_NAME}
@@ -202,7 +202,7 @@ services:
   # Monitoring & Observability
   # ----------------------------------------
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.1.0
     container_name: prometheus
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml # Requires a config file
@@ -217,7 +217,7 @@ services:
       - platform-network
 
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:latest
+    image: gcr.io/cadvisor/cadvisor:v0.49.2
     container_name: cadvisor
     volumes:
       - /:/rootfs:ro
@@ -233,7 +233,7 @@ services:
     networks:
       - platform-network
   mysqld-exporter:
-    image: prom/mysqld-exporter:latest
+    image: prom/mysqld-exporter:v0.16.0
     container_name: mysqld-exporter
     environment:
       - MOODLE_DB_USER=${MOODLE_DB_USER}
@@ -248,7 +248,7 @@ services:
       - moodle-db
     restart: unless-stopped
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.2.2
     container_name: grafana
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
@@ -280,7 +280,7 @@ services:
       - PGID=1000
       - TZ=America/Toronto
       - KASM_PORT=443
-      - KASM_PUBLIC_URL=https://kasm.university.local
+      - KASM_PUBLIC_URL=https://labs.university.local
     volumes:
       - kasm_config:/config
       - /dev/shm:/dev/shm
@@ -289,7 +289,7 @@ services:
       - "3000:3000"  # initial setup wizard port if required
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.kasm.rule=Host(`kasm.university.local`)"
+      - "traefik.http.routers.kasm.rule=Host(`labs.university.local`)"
       - "traefik.http.routers.kasm.entrypoints=web"
       - "traefik.http.services.kasm.loadbalancer.server.port=443"
     networks:
