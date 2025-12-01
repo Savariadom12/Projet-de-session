@@ -32,6 +32,35 @@ La plateforme est conçue autour d'une architecture microservices où chaque ser
 | **cAdvisor** | Métriques de performance des conteneurs | `http://cadvisor.university.local` |
 | **MySQL Exporter** | Export des métriques de la base de données Moodle | (Utilisé par Prometheus) |
 
+
+Images utilisé:
+
+| Service          | Description                                              | Image                                                                 |
+|-------------------|----------------------------------------------------------|----------------------------------------------------------------------|
+| **Traefik**       | Reverse Proxy et Dashboard de routage                   | `traefik:v2.11.4`                                                   |
+| **Drupal**        | CRM, portail vitrine et gestion des admissions          | `drupal:10.3-apache-bullseye`<br>DB: `postgres:18.3-alpine3.20`    |
+| **Moodle**        | Plateforme d’enseignement en ligne (LMS)                | `ellakcy/moodlemsql_maria_apache_405_php8.3` *(non officiel)*<br>DB: `mysql:8.4` |
+| **Nextcloud**     | Partage et gestion de fichiers                          | `nextcloud:28.0.5-apache`<br>DB: `postgres:18.3-alpine3.20`        |
+| **Keycloak**      | Gestion des identités et authentification unique (SSO) | `quay.io/keycloak/keycloak:26.0.5`<br>DB: `postgres:18.3-alpine3.20` |
+| **n8n**           | Automatisation des workflows et échange de données      | `n8nio/n8n:1.73.0`<br>DB: `postgres:18.3-alpine3.20`               |
+| **Kasm**          | Laboratoires et bureaux à distance via le navigateur    | `linuxserver/kasm:latest`<br>Image officiel: `kasmweb/kasm:1.15.0` *(non utilisable)* |
+| **Prometheus**    | Collecte de métriques et monitoring                     | `prom/prometheus:v2.14`                                            |
+| **Grafana**       | Visualisation des données et tableaux de bord           | `grafana/grafana:11.2.2`                                           |
+| **cAdvisor**      | Métriques de performance des conteneurs                 | `gcr.io/cadvisor/cadvisor:v0.49.2`                                 |
+| **MySQL Exporter**| Export des métriques de la base de données Moodle       | `prom/mysqld-exporter:v0.18.0`                                     |
+
+
+Schéma global d’architecture 
+Image 1
+
+Architecture réseau 
+Cette segmentation limite les communications inutiles et réduit la surface d’attaque. 
+Image 2
+Image 3
+
+Flux étudiant et enseignant 
+Image 4 et 5
+
 ## Prérequis
 
 Avant de commencer, assurez-vous d'avoir installé les outils suivants :
@@ -49,38 +78,6 @@ Clonez ce dépôt sur votre machine locale.
 
 Créez un fichier `.env` à la racine du projet en copiant le modèle ci-dessous. **Remplissez toutes les valeurs `...` avec des mots de passe sécurisés.**
 
-```env
-# Drupal Variables
-DRUPAL_DB_NAME=drupaldb
-DRUPAL_DB_USER=drupaluser
-DRUPAL_DB_PASSWORD=...
-
-# Moodle Variables
-MOODLE_DB_NAME=moodledb
-MOODLE_DB_USER=moodleuser
-MOODLE_DB_PASSWORD=...
-MOODLE_DB_ROOT_PASSWORD=...
-
-# Nextcloud Variables
-NEXTCLOUD_DB_NAME=nextclouddb
-NEXTCLOUD_DB_USER=nextclouduser
-NEXTCLOUD_DB_PASSWORD=...
-
-# Keycloak Variables
-KEYCLOAK_DB_NAME=keycloakdb
-KEYCLOAK_DB_USER=keycloakuser
-KEYCLOAK_DB_PASSWORD=...
-KEYCLOAK_ADMIN_USER=admin
-KEYCLOAK_ADMIN_PASSWORD=...
-
-# n8n Variables
-N8N_DB_NAME=n8ndb
-N8N_DB_USER=n8nuser
-N8N_DB_PASSWORD=...
-
-# KASM Variables
-KASM_ADMIN_PASSWORD=admin
-```
 
 ### 3. Configurer les fichiers externes
 
@@ -128,3 +125,4 @@ Une fois les conteneurs démarrés, vous pouvez accéder aux services via les UR
 -   **Traefik Dashboard :** `http://localhost:8080` pour voir l'état du routage.
 -   **Prometheus :** `http://monitoring.university.local` pour explorer les métriques. Allez dans **Status -> Targets** pour vérifier que tous les services sont bien surveillés.
 -   **Grafana :** `http://grafana.university.local` pour les tableaux de bord. N'hésitez pas à importer des dashboards depuis la communauté Grafana (par exemple, ID `13978` pour Docker, `7362` pour MySQL).
+
