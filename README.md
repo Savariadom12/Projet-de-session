@@ -55,8 +55,8 @@ Schéma global d’architecture
 
 Architecture réseau 
 Cette segmentation limite les communications inutiles et réduit la surface d’attaque. 
-Image 2
-Image 3
+![Schéma global d’architecture ](https://github.com/Savariadom12/Projet-de-session/blob/main/Images/Architecture%20r%C3%A9seau%20.png)
+![Schéma global d’architecture ](./Images/Interface%20r%C3%A9seau.png)
 
 Flux étudiant et enseignant 
 Image 4 et 5
@@ -125,5 +125,6 @@ Une fois les conteneurs démarrés, vous pouvez accéder aux services via les UR
 -   **Traefik Dashboard :** `http://localhost:8080` pour voir l'état du routage.
 -   **Prometheus :** `http://monitoring.university.local` pour explorer les métriques. Allez dans **Status -> Targets** pour vérifier que tous les services sont bien surveillés.
 -   **Grafana :** `http://grafana.university.local` pour les tableaux de bord. N'hésitez pas à importer des dashboards depuis la communauté Grafana (par exemple, ID `13978` pour Docker, `7362` pour MySQL).
+
 
 
