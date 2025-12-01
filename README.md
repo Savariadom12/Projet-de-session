@@ -1,3 +1,4 @@
+Le docker compose.yml est celui qui doit etre utilisé pour lancer les services, le docker compose best pratcice ne fonctionne pas et sert uniquemnent d'exemple pour les differents parametres qui peuvent etre configuré pour un déploiement sécurisé.
 ---
 
 # Plateforme Universitaire Libre et Composable (Open University Platform)
@@ -126,6 +127,10 @@ Une fois les conteneurs démarrés, vous pouvez accéder aux services via les UR
 -   **Traefik Dashboard :** `http://localhost:8080` pour voir l'état du routage.
 -   **Prometheus :** `http://monitoring.university.local` pour explorer les métriques. Allez dans **Status -> Targets** pour vérifier que tous les services sont bien surveillés.
 -   **Grafana :** `http://grafana.university.local` pour les tableaux de bord. N'hésitez pas à importer des dashboards depuis la communauté Grafana (par exemple, ID `13978` pour Docker, `7362` pour MySQL).
+
+## Scan de vulnérabilité
+Pour obtenir les résultats du scan de vulnérabilité, vous pouvez supprimer les résultats précédent en supprimant le dossier complet et en executant le script powershell a nouveau. Il va détecté automatiquement si un instance de trivy est disponible, sinon il va lancer un nouveau conteneur qui va executer le scan sur toutes les images.
+
 
 
 
