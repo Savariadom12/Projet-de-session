@@ -51,7 +51,7 @@ Images utilisé:
 
 
 Schéma global d’architecture 
-Image 1
+![Schéma global d’architecture ](https://github.com/Savariadom12/Projet-de-session/blob/main/Images/Sch%C3%A9ma%20Global.png)
 
 Architecture réseau 
 Cette segmentation limite les communications inutiles et réduit la surface d’attaque. 
@@ -125,4 +125,5 @@ Une fois les conteneurs démarrés, vous pouvez accéder aux services via les UR
 -   **Traefik Dashboard :** `http://localhost:8080` pour voir l'état du routage.
 -   **Prometheus :** `http://monitoring.university.local` pour explorer les métriques. Allez dans **Status -> Targets** pour vérifier que tous les services sont bien surveillés.
 -   **Grafana :** `http://grafana.university.local` pour les tableaux de bord. N'hésitez pas à importer des dashboards depuis la communauté Grafana (par exemple, ID `13978` pour Docker, `7362` pour MySQL).
+
 
